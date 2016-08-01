@@ -14,6 +14,8 @@
 #include <pcap.h>
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
+#include <netinet/udp.h>
+#include <netinet/ip_icmp.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <net/ethernet.h>
@@ -118,35 +120,94 @@ print_payload(const u_char *payload, int len)
 return;
 }
 
-void tcp(const u_char *packet, unsigned int currentLength,uint16_t payloadLength){
+void tcp(const u_char *packet, unsigned int currentLength){
 	struct tcphdr *tcpHeader = (struct tcphdr*)packet;
 	printf("Source Port: %d\n", ntohs(tcpHeader->th_sport));
 	printf("Destination Port: %d\n",ntohs(tcpHeader->th_dport));
+	
+	//tcp header size, multiply by 4 due to 4 rows(words).
 	int tcpHeaderSize = tcpHeader->doff*4;
+
+	//current payload - tcp header sizse
 	unsigned int dataSize = currentLength - tcpHeaderSize;
-	if(currentLength==0){
-		dataSize = payloadLength;
-	} else{
-		dataSize = currentLength - tcpHeaderSize;
-	}
+	
 	
 
-	printf("Payload: %d\n", dataSize);
+	printf("Payload: %d (bytes)\n", dataSize);
 	print_payload(packet+tcpHeaderSize,dataSize);
 	
-
-	//packet+(tcpHeader->thoff);
 }
 
-void protocol(const u_char *packet, u_int8_t protocol, unsigned int currentLength, uint16_t payloadLength){
+void udp(const u_char *packet){
+	struct udphdr *udpHeader = (struct udphdr*)packet;
+
+	printf("Source Port: %d\n", ntohs(udpHeader->uh_sport));
+	printf("Destination Port: %d\n",ntohs(udpHeader->uh_dport));
+
+	//standard udp header size
+	int udpHeaderSize = sizeof(struct udphdr);
+	int dataSize = ntohs(udpHeader->uh_ulen)-udpHeaderSize;
+	printf("Payload: %d (bytes)\n ", dataSize);
+	print_payload(packet+udpHeaderSize,dataSize);
+
+
+}
+
+void icmp(const u_char *packet,unsigned int currentLength){
+	struct icmphdr *icmpHeader = (struct icmphdr*)packet;
+
+	//standard udp header size
+	int icmpHeaderSize = sizeof(struct icmphdr);
+	//current length - 8 bytes (data error)
+	int dataSize = currentLength - icmpHeaderSize;
+
+	int type = icmpHeader->type;
+	if(type==ICMP_ECHO){
+		printf("Type: Echo Request\n");
+	} else if(type==ICMP_ECHOREPLY){
+		printf("Type: Echo Reply\n");
+	} else if(type==ICMP_DEST_UNREACH){
+		printf("Type: Destination Unreachable\n");
+	} else if(type==ICMP_SOURCE_QUENCH){
+		printf("Type: Source Quench\n");
+	} else if(type==ICMP_REDIRECT){
+		printf("Type: Redirect\n");
+	} else if(type==ICMP_TIME_EXCEEDED){
+		printf("Type: Time Exceeded\n");
+	} else if(type==ICMP_PARAMETERPROB){
+		printf("Type: Parameter Problem\n");
+	} else if(type==ICMP_TIMESTAMP){
+		printf("Type: Timestamp Request\n");
+	} else if(type==ICMP_TIMESTAMPREPLY){
+		printf("Type: Timestamp Reply\n");
+	} else if(type==ICMP_INFO_REQUEST){
+		printf("Type: Information Request\n");
+	} else if(type==ICMP_INFO_REPLY){
+		printf("Type: Information Reply\n");
+	} else if(type==ICMP_ADDRESS){
+		printf("Type: Address Mask Request\n");
+	} else if(type==ICMP_ADDRESSREPLY){
+		printf("Type: Address Mask Reply\n");
+	} 
+
+
+	printf("Payload: %d (bytes)\n ", dataSize);
+	print_payload(packet+icmpHeaderSize,dataSize);
+
+
+}
+
+void protocol(const u_char *packet, u_int8_t protocol, unsigned int currentLength){
 	//protocol definitions from http://www.tcpdump.org/sniffex.c
 	if(protocol==IPPROTO_ICMP){
 		printf("Protocol: ICMP\n");
+		icmp(packet,currentLength);
 	} else if(protocol==IPPROTO_TCP){
 		printf("Protocol: TCP\n");
-		tcp(packet, currentLength,payloadLength);
+		tcp(packet, currentLength);
 	} else if(protocol==IPPROTO_UDP){
 		printf("Protocol: UDP\n");
+		udp(packet);
 	}
 
 	
@@ -171,41 +232,14 @@ void ip6Header(const u_char *packet){
 	printf("From: %s\n",src);
 	printf("To: %s\n",dst);
 
-	struct ip6_hdrctl *ip6Headctl = (struct ip6_hdrctl*)packet;
+	// struct ip6_hdrctl *ip6Headctl = (struct ip6_hdrctl*)packet;
 
-	u_int8_t ip6_protocol = ip6Headctl->ip6_un1_nxt;
-	uint16_t payloadLength = ntohs(ip6Headctl->ip6_un1_plen);   /* payload length */
+	u_int8_t ip6_protocol = ip6Head->ip6_nxt;
+	int payloadLength = ntohs(ip6Head->ip6_plen);   /* payload length */
 	int ip6HeadSize = sizeof(struct ip6_hdr);
 
-	protocol(packet+ip6HeadSize, ip6_protocol, 0,payloadLength);
 
-
-
-
-	//printf("Next header: %d", ip6Head->ip6_un1_nxt);
-
-	//printf("From: %s\n",inet_ntop(src));
-	//printf("To: %s\n",inet_ntop(dst));
-	//protocol(packet+sizeof(struct ip6_hdr))
-	//printf("Size of ipv6 header: %d\n",sizeof(struct ip6_hdr));
-
-
-
-
-	/*
-	https://github.com/shreyasrama/ethernet-packet-sniffer/blob/master/sniffer.c
-		// Prints details of an IPv6 header.
-void print_ipv6_header(struct ipv6* ipv6_header) {
-	char srcaddr[32];
-	char dstaddr[32];
-	inet_ntop(AF_INET6, &ipv6_header->ip_src, srcaddr, sizeof(srcaddr)); // inet_ntop() takes a binary address (both IP versions) and returns in text form
-	inet_ntop(AF_INET6, &ipv6_header->ip_dst, dstaddr, sizeof(dstaddr));
-	printf("From: %s\n", srcaddr);
-	printf("To: %s\n", dstaddr);
-	printf("Protocol: %s\n", get_protocol_name(ipv6_header->next_header));
-}
-
-	*/
+	protocol(packet+ip6HeadSize, ip6_protocol, payloadLength);
 }
 
 void ipHeader(const u_char *packet){
@@ -225,7 +259,7 @@ void ipHeader(const u_char *packet){
 	//current Length = Layer 3 protocol header + data payload
 	unsigned int currentLength = totLength - ipHeaderSize;
 	//printf("current Length: %d",currentLength);
-	protocol(packet+ipHeaderSize, ipHead->ip_p, currentLength,0);
+	protocol(packet+ipHeaderSize, ipHead->ip_p, currentLength);
 }
 
 
